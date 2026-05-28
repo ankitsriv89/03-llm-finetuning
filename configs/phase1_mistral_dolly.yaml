@@ -1,0 +1,140 @@
+# ============================================================
+# Phase 1 Config: Mistral-7B + Dolly-15K (Foundation Run)
+# ============================================================
+# This file controls every knob in the training pipeline.
+# We'll tweak these values as we move to domain-specific phases.
+
+# --- Model ---
+model:
+  name: "mistralai/Mistral-7B-Instruct-v0.2"
+  # Why Mistral-7B-Instruct?
+  #   - Already instruction-tuned (chat-ready), so we're fine-tuning on top
+  #   - Apache 2.0 license: no Meta account, no usage restrictions
+  #   - 7B params: trainable on a single 16GB GPU with QLoRA (4-bit)
+  #   - Better benchmark scores than LLaMA-7B on most tasks
+
+  # Quantization: loads the base model in 4-bit (the "Q" in QLoRA)
+  # Without this, 7B model = ~14GB in float16. With 4-bit = ~3.5GB.
+  load_in_4bit: true
+
+  # BnB (bitsandbytes) 4-bit config
+  bnb_4bit_compute_dtype: "float16"
+  # ^ The stored weights are int4, but computation happens in float16.
+  #   This is a performance/accuracy tradeoff. float16 is the sweet spot.
+
+  bnb_4bit_quant_type: "nf4"
+  # ^ "nf4" = NormalFloat4. Designed specifically for normally-distributed
+  #   neural network weights. Better than plain int4 for transformers.
+  #   Introduced in the original QLoRA paper (Dettmers et al., 2023).
+
+  bnb_4bit_use_double_quant: true
+  # ^ "Double quantization": quantize the quantization constants themselves.
+  #   Saves ~0.4 bits per parameter extra. Minimal quality loss.
+
+
+# --- LoRA Adapter ---
+lora:
+  r: 16
+  # ^ Rank of the LoRA matrices. Think of it as "how expressive is the adapter?"
+  #   r=8:  fewer params, faster, less capacity  (~good for simple tasks)
+  #   r=16: balanced — standard starting point
+  #   r=64: more capacity, slower, more memory
+  #   Rule of thumb: start at 16, go higher only if underfitting.
+
+  lora_alpha: 32
+  # ^ Scaling factor. Effective learning rate for LoRA = (alpha / r) * lr.
+  #   alpha=2*r is the standard convention (so alpha/r = 2).
+  #   Don't overthink this; keep alpha = 2*r.
+
+  lora_dropout: 0.05
+  # ^ Dropout applied to LoRA layers during training. Prevents overfitting.
+  #   0.05 = 5% of activations randomly zeroed per forward pass.
+
+  bias: "none"
+  # ^ Whether to train bias terms. "none" = only train LoRA weights.
+  #   Adds complexity for marginal gain; keep as "none".
+
+  task_type: "CAUSAL_LM"
+  # ^ The type of model head. CAUSAL_LM = next-token prediction (GPT-style).
+  #   Other options: SEQ_CLS (classification), SEQ_2_SEQ_LM (T5-style).
+
+  target_modules:
+    - "q_proj"    # Query projection in self-attention
+    - "k_proj"    # Key projection
+    - "v_proj"    # Value projection
+    - "o_proj"    # Output projection
+    - "gate_proj" # FFN gate (Mistral uses SwiGLU activation, has 3 FFN matrices)
+    - "up_proj"   # FFN up projection
+    - "down_proj" # FFN down projection
+  # ^ Which weight matrices to attach LoRA adapters to.
+  #   More modules = more trainable params = more expressive but slower.
+  #   For instruction tuning, targeting all 7 (attention + FFN) is standard.
+
+
+# --- Dataset ---
+dataset:
+  name: "databricks/databricks-dolly-15k"
+  # ^ 15,000 high-quality instruction-response pairs created by Databricks employees.
+  #   Categories: open QA, closed QA, summarization, brainstorming, classification,
+  #               creative writing, information extraction.
+  #   License: CC BY-SA 3.0 — free for commercial and research use.
+  split: "train"
+  max_samples: 5000
+  # ^ Using 5K of 15K for the foundation run — faster iteration.
+  #   Full 15K for production runs.
+
+
+# --- Training ---
+training:
+  output_dir: "./outputs/phase1-mistral-dolly"
+
+  num_train_epochs: 1
+  # ^ 1 epoch = one full pass through the dataset.
+  #   For instruction tuning, 1-3 epochs is typical.
+  #   More epochs → risk of overfitting (model memorizes training data).
+
+  per_device_train_batch_size: 4
+  # ^ Number of samples processed per GPU per step.
+  #   Larger = more stable gradients but more memory.
+  #   With QLoRA on 7B, batch_size=4 fits in ~16GB.
+
+  gradient_accumulation_steps: 4
+  # ^ Simulate a larger batch without more memory.
+  #   Effective batch size = per_device_train_batch_size * gradient_accumulation_steps
+  #                        = 4 * 4 = 16
+  #   Gradients are accumulated for 4 steps before a weight update.
+
+  learning_rate: 2.0e-4
+  # ^ How big each weight update step is.
+  #   Too high → unstable training, loss spikes.
+  #   Too low → slow convergence.
+  #   2e-4 is the standard starting point for QLoRA fine-tuning.
+
+  lr_scheduler_type: "cosine"
+  # ^ How the learning rate changes over training.
+  #   "cosine": starts at lr, smoothly decays to near-zero following a cosine curve.
+  #   Better than "linear" for LLM fine-tuning — prevents abrupt drops.
+
+  warmup_ratio: 0.03
+  # ^ Fraction of total steps used for warmup.
+  #   During warmup, lr linearly increases from 0 → learning_rate.
+  #   Prevents unstable large updates at the very start of training.
+  #   0.03 = 3% of total steps.
+
+  max_seq_length: 512
+  # ^ Max token length per training sample. Longer sequences = more memory.
+  #   Dolly samples are mostly short; 512 covers ~95% of them.
+  #   For medical/legal (longer documents) we'll increase this to 1024-2048.
+
+  fp16: true
+  # ^ Mixed precision training. Computation in float16, master weights in float32.
+  #   Cuts memory roughly in half vs full float32 training.
+  #   Use bf16: true instead if your GPU supports it (A100, H100, newer).
+
+  logging_steps: 10
+  save_steps: 100
+  save_total_limit: 2
+  # ^ Only keep the 2 most recent checkpoints. Saves disk space.
+
+  report_to: "none"
+  # ^ Change to "wandb" if you want loss curves tracked in Weights & Biases.
