@@ -14,8 +14,6 @@ short_description: Multi-domain LLM fine-tuning with QLoRA — Mistral-7B across
 
 Fine-tune **Mistral-7B-Instruct-v0.2** on domain-specific datasets using **QLoRA** (4-bit quantized LoRA). Covers 5 domains progressively — general instruction following, medical, legal, finance, and coding — with a multi-adapter Gradio demo.
 
-> **Part 3 of 8** in a production-grade AI/ML portfolio series targeting Senior Data Scientist roles.
-
 ## What This Project Demonstrates
 
 - **QLoRA pipeline** end-to-end: quantized model loading → LoRA adapter injection → supervised fine-tuning → HF Hub deployment
