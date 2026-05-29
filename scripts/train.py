@@ -23,9 +23,10 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
+    TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer, SFTConfig
+from trl import SFTTrainer
 
 
 # ─────────────────────────────────────────────
@@ -212,15 +213,16 @@ def load_and_prepare_dataset(cfg: dict, tokenizer):
 # 6. Build Training Arguments
 # ─────────────────────────────────────────────
 
-def build_training_args(cfg: dict) -> SFTConfig:
+def build_training_args(cfg: dict) -> TrainingArguments:
     """
-    SFTConfig: replaces TrainingArguments + SFTTrainer's own kwargs in TRL >= 0.9.
-    max_seq_length, dataset_text_field, and packing moved here from SFTTrainer.__init__.
+    TrainingArguments: HuggingFace's container for all training hyperparameters.
+    Pinned to TRL 0.8.6 API where max_seq_length/dataset_text_field/packing
+    are passed directly to SFTTrainer.__init__, not here.
 
     Key concepts explained in the YAML config file.
     """
     tcfg = cfg["training"]
-    return SFTConfig(
+    return TrainingArguments(
         output_dir=tcfg["output_dir"],
         num_train_epochs=tcfg["num_train_epochs"],
         per_device_train_batch_size=tcfg["per_device_train_batch_size"],
@@ -236,10 +238,6 @@ def build_training_args(cfg: dict) -> SFTConfig:
         optim="paged_adamw_32bit",
         gradient_checkpointing=True,
         group_by_length=True,
-        # SFT-specific (moved from SFTTrainer.__init__ in TRL >= 0.9)
-        max_seq_length=tcfg["max_seq_length"],
-        dataset_text_field="text",
-        packing=False,
     )
 
 
@@ -273,9 +271,12 @@ def train(cfg: dict):
     #   - LoRA-aware checkpointing
     trainer = SFTTrainer(
         model=model,
-        processing_class=tokenizer,   # replaces tokenizer= in TRL >= 0.9
+        tokenizer=tokenizer,
         train_dataset=dataset,
-        args=training_args,           # SFTConfig carries max_seq_length, dataset_text_field, packing
+        dataset_text_field="text",
+        max_seq_length=cfg["training"]["max_seq_length"],
+        args=training_args,
+        packing=False,
     )
 
     # Train
