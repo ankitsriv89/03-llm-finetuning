@@ -1,0 +1,16 @@
+# RunPod — GPU-agnostic Phase 2 Medical
+# Tested base image: runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04
+# Install with:  pip install -r requirements_runpod.txt
+
+transformers==4.46.3
+peft==0.13.2
+trl==0.12.2
+accelerate==1.1.1
+datasets==3.0.0
+huggingface_hub
+bitsandbytes==0.45.3
+tqdm
+
+# Optional but recommended on Ampere/Hopper (A40, A100, L40S, H100, 4090).
+# If install fails (e.g. older sm_75 like T4), comment this line out and set NO_FLASH=1.
+flash-attn==2.6.3 --no-build-isolation

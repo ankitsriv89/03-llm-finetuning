@@ -98,9 +98,11 @@ This is more efficient than loading 5 separate models (each 3.5GB in 4-bit).
 - [ ] Smoke test inference
 
 ### Phase 2: Medical Domain
-- [ ] configs/phase2_medical_medqa.yaml
-- [ ] notebooks/02_medical.ipynb
-- [ ] Dataset: medalpaca/medical_meadow_medqa
+- [x] configs/phase2_medical_medqa.yaml
+- [x] notebooks/02_medical.ipynb
+- [x] scripts/evaluate.py (MCQ + Groq LLM-judge modes)
+- [x] Dataset: medalpaca/medical_meadow_medqa
+- [ ] Run on Kaggle T4 GPU
 - [ ] Evaluation: 4-option MCQ accuracy on held-out set
 - [ ] Push medical adapter
 

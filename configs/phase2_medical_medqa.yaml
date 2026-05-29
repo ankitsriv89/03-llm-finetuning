@@ -1,0 +1,125 @@
+# ============================================================
+# Phase 2 Config: Mistral-7B + MedAlpaca MedQA (Medical Domain)
+# ============================================================
+# Fine-tunes the same Mistral-7B-Instruct base on medical MCQ data.
+# Dataset: medalpaca/medical_meadow_medqa (~10K 4-option clinical MCQs)
+# Goal: Improve accuracy on medical MCQ vs base Mistral by ≥5pp
+#
+# Changes from Phase 1 (Dolly):
+#   - dataset.name: medical_meadow_medqa (input/output format, not instruction/response)
+#   - dataset.max_samples: 10000 (full dataset)
+#   - training.num_train_epochs: 2 (longer — medical reasoning benefits from more passes)
+#   - training.max_seq_length: 1024 (clinical descriptions are longer than Dolly samples)
+#   - training.output_dir: ./outputs/phase2-medical-medqa
+#   - evaluation.enabled: true (MCQ accuracy on held-out test split)
+
+# --- Model ---
+model:
+  name: "mistralai/Mistral-7B-Instruct-v0.2"
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+
+# --- LoRA Adapter ---
+# Same config as Phase 1 — rank/alpha/targets are dataset-agnostic.
+# The adapter will be saved separately and loaded as "medical" at demo time.
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+
+# --- Dataset ---
+dataset:
+  name: "medalpaca/medical_meadow_medqa"
+  # ^ MedAlpaca's MedQA subset: ~10K 4-option clinical MCQs
+  #   Format: {input: "Question + A/B/C/D options", output: "Answer letter + explanation"}
+  #   License: CC BY-NC 4.0 (non-commercial)
+  #   Source: USMLE-style questions from the MedQA benchmark
+  split: "train"
+  max_samples: null
+  # ^ null = use full dataset (~10K samples). Phase 1 used 5K; here we use all.
+
+  test_size: 0.1
+  # ^ Hold out 10% for evaluation after training. ~1K samples for MCQ accuracy scoring.
+
+  filter_5_option: true
+  # ^ A small number of samples have 5 options (A-E). Filter these out to keep
+  #   evaluation clean — our extract_answer() regex only handles A-D.
+
+
+# --- Training ---
+training:
+  output_dir: "./outputs/phase2-medical-medqa"
+
+  num_train_epochs: 2
+  # ^ 2 epochs for medical domain. Medical reasoning requires more exposure:
+  #   clinical terminology, symptom-diagnosis mapping, differential reasoning.
+  #   2 epochs is safe given 10K samples — overfitting risk is low.
+
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  # effective batch size = 4 * 4 = 16 (same as Phase 1)
+
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+
+  max_seq_length: 1024
+  # ^ Increased from 512. Clinical case descriptions + 4 answer options often
+  #   exceed 512 tokens. 1024 covers >98% of MedQA samples without truncation.
+
+  fp16: false
+  # ^ Keep false — see train.py build_training_args() note: bf16=True is set
+  #   in code because Mistral loads in bfloat16; fp16 causes dtype mismatch.
+
+  logging_steps: 10
+  save_steps: 200
+  # ^ Save less frequently than Phase 1 (steps/epoch ≈ 2250 at batch=4/accum=4).
+  #   save_steps=200 gives ~10 checkpoints per epoch — enough for recovery.
+
+  save_total_limit: 2
+  report_to: "none"
+  # ^ Switch to "wandb" to get live loss curves during Kaggle run.
+
+
+# --- Evaluation ---
+# After training, evaluate MCQ accuracy on the held-out test split.
+# Run: python scripts/evaluate.py --config configs/phase2_medical_medqa.yaml
+#                                  --adapter outputs/phase2-medical-medqa/final-adapter
+#                                  --mode mcq
+evaluation:
+  enabled: true
+  mode: "mcq"
+  # ^ "mcq" = extract predicted letter (A/B/C/D) and compare to ground truth
+  metric: "accuracy"
+  max_eval_samples: 500
+  # ^ Evaluate on 500 samples from the 10% held-out split (faster than full 1K).
+  #   Full 1K evaluation: set to null.
+
+  # Baseline to beat: base Mistral-7B-Instruct-v0.2 on MedQA
+  # Expected baseline: ~45-50% (random chance = 25%)
+  # Target: ≥50-55% (≥5pp improvement over baseline)
+  target_improvement_pp: 5
+
+
+# --- HuggingFace Hub ---
+# After training + evaluation, push the adapter:
+#   python scripts/push_to_hub.py --adapter outputs/phase2-medical-medqa/final-adapter
+#                                  --repo-name mistral-7b-medical-medqa-qlora
+hub:
+  adapter_name: "medical"
+  repo_suffix: "mistral-7b-medical-medqa-qlora"
+  # ^ Full repo ID: {your_hf_username}/{repo_suffix}
