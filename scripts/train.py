@@ -23,10 +23,9 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 
 # ─────────────────────────────────────────────
@@ -213,15 +212,15 @@ def load_and_prepare_dataset(cfg: dict, tokenizer):
 # 6. Build Training Arguments
 # ─────────────────────────────────────────────
 
-def build_training_args(cfg: dict) -> TrainingArguments:
+def build_training_args(cfg: dict) -> SFTConfig:
     """
-    TrainingArguments: HuggingFace's container for all training hyperparameters.
-    These are passed to the Trainer/SFTTrainer.
+    SFTConfig: replaces TrainingArguments + SFTTrainer's own kwargs in TRL >= 0.9.
+    max_seq_length, dataset_text_field, and packing moved here from SFTTrainer.__init__.
 
     Key concepts explained in the YAML config file.
     """
     tcfg = cfg["training"]
-    return TrainingArguments(
+    return SFTConfig(
         output_dir=tcfg["output_dir"],
         num_train_epochs=tcfg["num_train_epochs"],
         per_device_train_batch_size=tcfg["per_device_train_batch_size"],
@@ -234,18 +233,13 @@ def build_training_args(cfg: dict) -> TrainingArguments:
         save_steps=tcfg["save_steps"],
         save_total_limit=tcfg["save_total_limit"],
         report_to=tcfg["report_to"],
-        # Recommended additions
         optim="paged_adamw_32bit",
-        # ^ "Paged AdamW": Adam optimizer with paged memory management.
-        #   Introduced in the QLoRA paper. Offloads optimizer states to CPU RAM
-        #   when GPU memory is tight. Prevents OOM (Out of Memory) errors.
         gradient_checkpointing=True,
-        # ^ Trade compute for memory. Instead of storing ALL intermediate
-        #   activations for backprop, recompute them on the fly.
-        #   ~30% slower training, but cuts activation memory by 60-70%.
         group_by_length=True,
-        # ^ Group samples of similar length in the same batch.
-        #   Reduces padding → more efficient training.
+        # SFT-specific (moved from SFTTrainer.__init__ in TRL >= 0.9)
+        max_seq_length=tcfg["max_seq_length"],
+        dataset_text_field="text",
+        packing=False,
     )
 
 
@@ -279,14 +273,9 @@ def train(cfg: dict):
     #   - LoRA-aware checkpointing
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,   # replaces tokenizer= in TRL >= 0.9
         train_dataset=dataset,
-        dataset_text_field="text",       # column containing formatted strings
-        max_seq_length=cfg["training"]["max_seq_length"],
-        args=training_args,
-        packing=False,
-        # ^ packing=True: concatenate short samples to fill the full context window.
-        #   More GPU-efficient but loses sample boundaries. Start with False.
+        args=training_args,           # SFTConfig carries max_seq_length, dataset_text_field, packing
     )
 
     # Train
