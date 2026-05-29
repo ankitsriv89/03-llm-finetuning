@@ -23,10 +23,9 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 
 
 # ─────────────────────────────────────────────
@@ -213,16 +212,19 @@ def load_and_prepare_dataset(cfg: dict, tokenizer):
 # 6. Build Training Arguments
 # ─────────────────────────────────────────────
 
-def build_training_args(cfg: dict) -> TrainingArguments:
+def build_training_args(cfg: dict) -> SFTConfig:
     """
-    TrainingArguments: HuggingFace's container for all training hyperparameters.
-    Pinned to TRL 0.8.6 API where max_seq_length/dataset_text_field/packing
-    are passed directly to SFTTrainer.__init__, not here.
+    SFTConfig: TRL 0.13+ unified config that merges TrainingArguments and SFTTrainer
+    dataset params (max_length, dataset_text_field, packing) into one object.
 
-    Key concepts explained in the YAML config file.
+    Key change from TRL 0.8.x:
+    - Use SFTConfig instead of TrainingArguments
+    - Pass max_length / dataset_text_field / packing here, not to SFTTrainer.__init__
+    - Use bf16=True (not fp16=True) — Mistral loads in bfloat16 by default; fp16
+      causes "_amp_foreach_non_finite_check_and_unscale_cuda not implemented for BFloat16"
     """
     tcfg = cfg["training"]
-    return TrainingArguments(
+    return SFTConfig(
         output_dir=tcfg["output_dir"],
         num_train_epochs=tcfg["num_train_epochs"],
         per_device_train_batch_size=tcfg["per_device_train_batch_size"],
@@ -230,7 +232,8 @@ def build_training_args(cfg: dict) -> TrainingArguments:
         learning_rate=tcfg["learning_rate"],
         lr_scheduler_type=tcfg["lr_scheduler_type"],
         warmup_ratio=tcfg["warmup_ratio"],
-        fp16=tcfg["fp16"],
+        fp16=False,
+        bf16=True,
         logging_steps=tcfg["logging_steps"],
         save_steps=tcfg["save_steps"],
         save_total_limit=tcfg["save_total_limit"],
@@ -238,6 +241,9 @@ def build_training_args(cfg: dict) -> TrainingArguments:
         optim="paged_adamw_32bit",
         gradient_checkpointing=True,
         group_by_length=True,
+        max_length=tcfg["max_seq_length"],
+        dataset_text_field="text",
+        packing=False,
     )
 
 
@@ -269,14 +275,13 @@ def train(cfg: dict):
     #   - Automatic response masking (only compute loss on assistant turns)
     #   - Dataset formatting helpers
     #   - LoRA-aware checkpointing
+    # TRL 0.13+: dataset_text_field / max_length / packing go in SFTConfig, not here.
+    # processing_class= replaces the deprecated tokenizer= param (Transformers 5.x).
     trainer = SFTTrainer(
         model=model,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=cfg["training"]["max_seq_length"],
         args=training_args,
-        packing=False,
     )
 
     # Train

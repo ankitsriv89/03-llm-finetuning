@@ -1,7 +1,7 @@
 # Core model loading and training
 transformers>=4.40.0        # Load pretrained models, tokenizers, chat templates
 peft>=0.10.0                # LoRA / QLoRA adapter support
-trl>=0.8.6                  # SFTTrainer: supervised fine-tuning made easy
+trl>=0.13.0                 # SFTTrainer + SFTConfig: supervised fine-tuning (0.13+ required for Transformers 5.x)
 bitsandbytes>=0.43.0        # 4-bit / 8-bit quantization (the Q in QLoRA)
 accelerate>=0.29.0          # Device placement, multi-GPU, mixed precision
 
