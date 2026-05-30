@@ -1,0 +1,103 @@
+# ============================================================
+# Phase 5 Config: Mistral-7B + Coding (CodeAlpaca 20K)
+# ============================================================
+# Fine-tunes Mistral-7B-Instruct on code generation tasks.
+#
+#   Dataset: HuggingFaceH4/CodeAlpaca_20K
+#            20,111 samples — full dataset used (small enough)
+#            Format: {prompt, completion}  ← NOT instruction/output
+#            License: Apache 2.0
+#            Content: Python-heavy, mixed with JS/Java/C++/etc.
+#
+# Note: field names differ from all prior phases — formatter uses
+# sample["prompt"] and sample["completion"], not instruction/response.
+#
+# Preprocessing: filter samples where prompt+completion > 974 tokens
+# (MAX_SEQ_LENGTH - 50) to avoid truncating mid-function.
+#
+# Goal: HumanEval pass@1 >= 40% (baseline Mistral ~35-40%)
+#
+# Eval: HumanEval pass@1 — generates code, runs unit tests
+# RunPod script: scripts/train_runpod_coding.py
+
+
+# --- Model ---
+model:
+  name: "mistralai/Mistral-7B-Instruct-v0.2"
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+
+# --- LoRA Adapter ---
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+
+# --- Dataset ---
+dataset:
+  name: "HuggingFaceH4/CodeAlpaca_20K"
+  split: "train"
+  max_samples: null           # use full 20K — no subsetting needed
+  shuffle_seed: 42
+  filter_long_samples: true   # drop samples > 974 tokens to avoid mid-function truncation
+
+  test_size: 0.05             # ~1K held-out; primary eval is HumanEval not this split
+  prompt_field: "prompt"      # CodeAlpaca uses "prompt", not "instruction"
+  completion_field: "completion"  # CodeAlpaca uses "completion", not "output"
+
+
+# --- Training ---
+training:
+  output_dir: "./outputs/phase5-coding"
+
+  num_train_epochs: 3
+
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  # effective batch = 16
+
+  learning_rate: 2.0e-4
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+
+  max_seq_length: 1024
+  # ^ Code completions are longer than finance (512) — algorithmic solutions
+  #   and multi-function files need 1024. Halves throughput vs finance.
+
+  fp16: false              # bf16=True set in script
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 2
+  report_to: "none"
+
+
+# --- Evaluation ---
+evaluation:
+  enabled: true
+  mode: "pass_at_1"
+  metric: "humaneval_pass_at_1"
+  n_problems: 30            # subset for speed; set to 164 for full benchmark
+  timeout_per_problem: 3.0  # seconds for unit test execution
+  decoding: "greedy"        # greedy (do_sample=False) for reproducible pass@1
+  target: 0.40              # >=40% pass@1 after fine-tuning
+
+
+# --- HuggingFace Hub ---
+hub:
+  adapter_name: "coding"
+  repo_suffix: "mistral-7b-coding-qlora"
+  # Full repo ID: {your_hf_username}/mistral-7b-coding-qlora

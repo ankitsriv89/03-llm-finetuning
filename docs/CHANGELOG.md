@@ -7,6 +7,28 @@ Dates are absolute (YYYY-MM-DD).
 
 ---
 
+## [Phase 5 — Coding] — 2026-05-31
+
+### Added
+- `configs/phase5_coding.yaml` — Mistral-7B + `HuggingFaceH4/CodeAlpaca_20K` (full 20K dataset). max_seq_length=1024 (code completions need headroom). LoRA r=16, 3 epochs, LR 2.0e-4. Effective batch 16.
+- `scripts/train_runpod_coding.py` — GPU-agnostic RunPod runner. seq_len=1024: batch sizes 8/4/4/2 for A100/A40/4090/T4 tiers. Est. wall time ~20–90 min depending on GPU.
+- Pre-training length filter: drops samples where prompt+completion > 974 tokens (MAX_SEQ_LENGTH - 50) to prevent mid-function truncation. Preserves code correctness in training signal.
+- Coding system prompt: expert software engineer framing, clean/correct/well-structured code.
+- Post-training HumanEval pass@1 eval: generates solutions for N HumanEval problems, runs unit tests, reports pass@1. Default N=30 (fast), max 164 (full benchmark). Greedy decoding for reproducibility. Baseline ~35–40%, target ≥40%.
+- `--n-problems` CLI flag to control HumanEval problem count.
+
+### Design notes
+- Field names differ from all prior phases: CodeAlpaca uses `prompt`/`completion`, not `instruction`/`output`. The formatter reads `sample["prompt"]` and `sample["completion"]` directly.
+- Full 20K dataset used without subsetting — small enough to fit in a single 3-epoch run.
+- HumanEval requires the `human-eval` package (Apache 2.0). Script auto-installs it if missing.
+
+### Known limitations
+- CodeAlpaca contains some samples with bugs in the expected completion — not model error.
+- HumanEval is Python-only; the CodeAlpaca training mix includes JS/Java/C++ — cross-language generalization not captured by pass@1.
+- Adapter not yet run on RunPod — `outputs/phase5-coding/` will populate after GPU run.
+
+---
+
 ## [Phase 4 — Finance] — 2026-05-31
 
 ### Added
