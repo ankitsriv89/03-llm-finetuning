@@ -7,6 +7,32 @@ Dates are absolute (YYYY-MM-DD).
 
 ---
 
+## [Phase 6 — Multi-Domain Demo] — 2026-05-31
+
+### Added
+- `app.py` — Gradio demo serving all 5 domain adapters from a single loaded base model.
+  - Domain selector (General / Medical / Legal / Finance / Coding) with hot-swap via PEFT `set_adapter()`
+  - Adapters loaded lazily on first use via `PeftModel.from_pretrained` + `model.load_adapter()`; base model loaded once in 4-bit NF4
+  - Streaming responses via `TextIteratorStreamer` on a background thread — Gradio displays tokens as they arrive
+  - `LOCAL_ADAPTERS` env var for testing with local adapter paths before HF Hub push (format: `"medical=./outputs/phase2/final-adapter"`)
+  - `NO_GPU=1` env var for CPU testing without CUDA
+  - Example prompts per domain (3 per domain), temperature + max-token sliders, clear button
+  - Greedy decoding for coding domain (deterministic pass@1 reproducibility); sampling for all others
+- `notebooks/03_legal.ipynb` — single notebook covering both Phase 3a (contracts) and 3b (Indian law). `PHASE = "3a"` / `"3b"` config toggle at top; all subsequent cells adapt automatically. Covers 3-way dataset mixing for 3b (primary + InLegalNLI + BNS mapping), LLM-judge eval with domain-specific rubric, HF Hub push.
+- `notebooks/04_finance.ipynb` — Phase 4 notebook: dataset exploration, formatter with 10% disclaimer injection, training, Groq LLM-judge eval, HF Hub push.
+- `notebooks/05_coding.ipynb` — Phase 5 notebook: length filter (drops >974-token samples to prevent mid-function truncation), HumanEval pass@1 eval (30 problems by default, configurable to 164), per-problem failure breakdown, HF Hub push.
+
+### Design notes
+- Multi-adapter hot-swap: one 4-bit base model (~3.5 GB) + 5 adapters (~50–200 MB each) vs 5 separate loaded models (~17.5 GB). Typical domain switch latency: <100 ms.
+- `_load_lock` prevents race conditions if multiple Gradio requests arrive before the base model finishes loading.
+- Adapter resolution: `LOCAL_ADAPTERS` env var checked first, falls back to HF Hub repo ID. Useful for running the demo before GPU runs complete.
+
+### Known limitations
+- Adapters for phases 3–5 not yet run on RunPod — demo will use base Mistral until GPU runs complete and adapters are pushed to HF Hub.
+- HumanEval sandbox (`check_correctness`) executes arbitrary code; safe in Kaggle/RunPod sandboxes but do not run on a production server without isolation.
+
+---
+
 ## [Phase 5 — Coding] — 2026-05-31
 
 ### Added

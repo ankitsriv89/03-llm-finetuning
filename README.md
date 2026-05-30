@@ -7,7 +7,7 @@ sdk: gradio
 app_file: app.py
 pinned: false
 license: apache-2.0
-short_description: Multi-domain LLM fine-tuning with QLoRA — Mistral-7B across 5 domains
+short_description: Multi-domain LLM fine-tuning with QLoRA — Mistral-7B across 5 domains with multi-adapter Gradio demo
 ---
 
 # 🧠 LLM Fine-Tuning with QLoRA
@@ -19,9 +19,10 @@ Fine-tune **Mistral-7B-Instruct-v0.2** on domain-specific datasets using **QLoRA
 - **QLoRA pipeline** end-to-end: quantized model loading → LoRA adapter injection → supervised fine-tuning → HF Hub deployment
 - **PEFT/TRL/bitsandbytes** ecosystem fluency
 - **Domain adaptation**: same base model, 5 specialized adapters
-- **Multi-adapter inference**: one loaded base model, hot-swap adapters at runtime
+- **Multi-adapter inference**: one loaded base model, hot-swap adapters at runtime — deployed as a Gradio demo on HuggingFace Spaces
 - **Config-driven training**: all hyperparameters in YAML, one script for all phases
 - **Evaluation**: MCQ accuracy (medical), pass@1 (coding), LLM-as-judge (legal/finance)
+- **Streaming inference**: TextIteratorStreamer for responsive token-by-token Gradio output
 
 ---
 
@@ -51,6 +52,8 @@ Dataset (HuggingFace Hub)
 | 3b | Legal (Indian law, JusticeAI) | `viber1/indian-law-dataset` + `InLegalNLI` + local BNS mapping | varies + 3K aux + ~800 mapping | 2048 |
 | 4 | Finance | `gbharti/finance-alpaca` (subset) | 10K | 512 |
 | 5 | Coding | `HuggingFaceH4/CodeAlpaca_20K` | 20K | 1024 |
+
+**Phase 6 — Multi-Domain Demo**: `app.py` loads the base model once in 4-bit and hot-swaps all 5 domain adapters at runtime using PEFT's multi-adapter API. Streaming responses via `TextIteratorStreamer`. Deployed on HuggingFace Spaces.
 
 **Phase 3 note**: Phase 3 was split into two parallel variants. **3a** targets universal contract clause QA. **3b** targets Indian law for JusticeAI (Project 9), and ships with a locally-generated BNS/BNSS/BSA mapping dataset (`scripts/build_bns_mapping_dataset.py` → `data/bns_bnss_bsa_mapping.jsonl`) that corrects the pre-July-2024 statute references baked into public Indian legal datasets. See `docs/CHANGELOG.md` for details.
 
@@ -87,6 +90,8 @@ Trainable parameters: ~20M out of 3.75B total (~0.53%)
 │   ├── train_runpod_medical.py           ← Phase 2 GPU-agnostic RunPod runner
 │   ├── train_runpod_legal_contracts.py   ← Phase 3a GPU-agnostic RunPod runner
 │   ├── train_runpod_indian_law.py        ← Phase 3b GPU-agnostic RunPod runner
+│   ├── train_runpod_finance.py           ← Phase 4 GPU-agnostic RunPod runner
+│   ├── train_runpod_coding.py            ← Phase 5 GPU-agnostic RunPod runner
 │   ├── build_bns_mapping_dataset.py      ← generates BNS/BNSS/BSA mapping JSONL
 │   ├── evaluate.py                       ← MCQ + LLM-as-judge eval (Groq)
 │   ├── inference.py                      ← load adapter + generate
@@ -94,16 +99,19 @@ Trainable parameters: ~20M out of 3.75B total (~0.53%)
 ├── data/
 │   └── bns_bnss_bsa_mapping.jsonl        ← 800+ post-July-2024 statute samples
 ├── notebooks/
-│   ├── 01_phase1_mistral_dolly.ipynb  ← run on Kaggle/Colab
+│   ├── 01_phase1_mistral_dolly.ipynb     ← run on Kaggle/Colab
 │   ├── 02_medical.ipynb
-│   ├── 03_legal.ipynb
+│   ├── 03_legal.ipynb                    ← covers 3a + 3b (PHASE config toggle)
 │   ├── 04_finance.ipynb
-│   └── 05_coding.ipynb
-├── app.py                             ← multi-domain Gradio demo
+│   └── 05_coding.ipynb                   ← includes HumanEval pass@1 eval
+├── app.py                                ← multi-domain Gradio demo (Phase 6)
+│                                            loads base model once, hot-swaps 5 adapters
+│                                            streaming inference via TextIteratorStreamer
 ├── docs/
-│   ├── PLAN.md                        ← architecture decisions + phases
-│   ├── TUTORIAL.md                    ← concepts from scratch (QLoRA, LoRA, etc.)
-│   └── DOMAIN_NOTES.md                ← dataset quirks + evaluation per domain
+│   ├── PLAN.md                           ← architecture decisions + phases
+│   ├── TUTORIAL.md                       ← concepts from scratch (QLoRA, LoRA, etc.)
+│   ├── DOMAIN_NOTES.md                   ← dataset quirks + evaluation per domain
+│   └── CHANGELOG.md                      ← per-phase change history
 └── requirements.txt
 ```
 
