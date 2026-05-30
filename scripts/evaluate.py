@@ -166,12 +166,13 @@ def evaluate_mcq(model, tokenizer, cfg: dict, max_samples: int = 500) -> dict:
     records   = []
 
     for sample in tqdm(test_set, desc="MCQ eval"):
-        gt = extract_ground_truth_letter(sample["output"])
+        assert isinstance(sample, dict)
+        gt = extract_ground_truth_letter(str(sample.get("output", "")))
         if gt == "?":
             continue
 
         response = generate(
-            model, tokenizer, sample["input"],
+            model, tokenizer, str(sample.get("input", "")),
             system=MEDICAL_SYSTEM, max_new_tokens=200
         )
         pred = extract_predicted_letter(response)
@@ -211,6 +212,53 @@ def evaluate_mcq(model, tokenizer, cfg: dict, max_samples: int = 500) -> dict:
 
 JUDGE_MODEL = "llama-3.3-70b-versatile"  # fast, free tier on Groq
 
+LEGAL_CONTRACTS_SYSTEM = (
+    "You are an expert legal assistant specializing in contract law. "
+    "When given a clause from a legal contract, analyze it carefully and provide "
+    "a clear, accurate explanation of its legal implications, risks, and key terms. "
+    "Use precise legal language while remaining accessible to non-lawyers. "
+    "Cite relevant legal concepts and flag any unusual or one-sided provisions."
+)
+
+INDIAN_LAW_SYSTEM = (
+    "You are an expert in Indian law with deep knowledge of the Bharatiya Nyaya Sanhita "
+    "(BNS, 2023), Bharatiya Nagarik Suraksha Sanhita (BNSS, 2023), Bharatiya Sakshya "
+    "Adhiniyam (BSA, 2023), the Constitution of India, and Indian Supreme Court and High "
+    "Court jurisprudence. When answering legal questions, cite the correct current statutes "
+    "(BNS/BNSS/BSA for post-July 2024 matters, IPC/CrPC/IEA for historical cases), "
+    "reference relevant Supreme Court precedents where applicable, and provide accurate, "
+    "precise legal analysis. Clearly distinguish between the old codes (IPC/CrPC) and the "
+    "new codes (BNS/BNSS/BSA) when the distinction is legally material."
+)
+
+# judge_system → (system_prompt, rubric_text, baseline_note)
+_LEGAL_JUDGE_CONFIGS: dict[str, tuple[str, str, str]] = {
+    "legal_contracts": (
+        LEGAL_CONTRACTS_SYSTEM,
+        (
+            "Rating criteria for contract clause responses:\n"
+            "1 — Wrong, irrelevant, or legally incorrect\n"
+            "2 — Partially correct with significant legal errors or omissions\n"
+            "3 — Correct interpretation but missing key legal implications\n"
+            "4 — Correct, complete, minor omissions; good legal precision\n"
+            "5 — Accurate, complete, legally precise; correctly identifies risks and obligations"
+        ),
+        "Baseline (Mistral base on contract clauses): ~3.0/5.0",
+    ),
+    "indian_law": (
+        INDIAN_LAW_SYSTEM,
+        (
+            "Rating criteria for Indian law responses:\n"
+            "1 — Wrong statute cited, incorrect legal principle, or factually wrong\n"
+            "2 — Correct general area but wrong section numbers or significant procedural errors\n"
+            "3 — Correct answer but missing key nuance (e.g. old vs new code distinction)\n"
+            "4 — Correct, proper citations, minor omissions in nuance or case law\n"
+            "5 — Accurate, correct BNS/BNSS/BSA vs IPC/CrPC distinction, relevant SC precedents cited"
+        ),
+        "Baseline (Mistral base on Indian law): ~2.5/5.0  |  Target: ≥3.5/5.0",
+    ),
+}
+
 
 def evaluate_llm_judge(
     model, tokenizer, cfg: dict, max_samples: int = 50, groq_api_key: str | None = None
@@ -219,14 +267,12 @@ def evaluate_llm_judge(
     Score responses with Groq's llama-3.3-70b-versatile as LLM judge on a 1-5 scale.
     Requires GROQ_API_KEY environment variable (or pass --groq-key).
 
-    Groq free tier: ~14,400 requests/day — more than enough for 50 eval samples.
+    Groq free tier: ~14,400 requests/day — more than enough for 100 eval samples.
 
-    Rubric (1-5):
-        1 — Completely wrong or irrelevant
-        2 — Partially addresses the question with major errors
-        3 — Correct answer but missing key details
-        4 — Correct and mostly complete, minor omissions
-        5 — Accurate, complete, domain-appropriate response
+    Domain dispatch via cfg["evaluation"]["judge_system"]:
+        "legal_contracts" — contract clause rubric (Phase 3a)
+        "indian_law"      — BNS/IPC/BNSS rubric (Phase 3b, JusticeAI)
+        (unset)           — generic 1-5 rubric (Phase 1/2 fallback)
     """
     try:
         from groq import Groq
@@ -247,42 +293,54 @@ def evaluate_llm_judge(
     response_field    = cfg["dataset"].get("response_field", "output")
     context_field     = cfg["dataset"].get("context_field", None)
 
+    # Pick domain-specific system prompt + judge rubric
+    judge_system_key = cfg.get("evaluation", {}).get("judge_system", "")
+    if judge_system_key in _LEGAL_JUDGE_CONFIGS:
+        domain_system, rubric, baseline_note = _LEGAL_JUDGE_CONFIGS[judge_system_key]
+    else:
+        domain_system = ""
+        rubric = (
+            "Rating criteria:\n"
+            "1 — Completely wrong or irrelevant\n"
+            "2 — Partially addresses the question with major errors\n"
+            "3 — Correct answer but missing key details\n"
+            "4 — Correct and mostly complete, minor omissions\n"
+            "5 — Accurate, complete, domain-appropriate response"
+        )
+        baseline_note = ""
+
     print(f"Loading dataset: {dataset_name}")
     raw = load_dataset(dataset_name, split="train")
     split    = raw.train_test_split(test_size=test_size, seed=42)
     test_set = split["test"].select(range(min(max_samples, len(split["test"]))))
     print(f"Evaluating {len(test_set)} samples with Groq LLM judge ({JUDGE_MODEL})")
+    if judge_system_key:
+        print(f"Judge rubric: {judge_system_key}")
 
     scores  = []
     records = []
 
     for sample in tqdm(test_set, desc="LLM-judge eval"):
-        instruction  = sample.get(instruction_field, sample.get("input", ""))
-        context      = sample.get(context_field, "") if context_field else ""
-        ground_truth = sample.get(response_field, "")
+        assert isinstance(sample, dict)
+        instruction  = str(sample.get(instruction_field) or sample.get("input") or "")
+        context      = str(sample.get(context_field) or "") if context_field else ""
+        ground_truth = str(sample.get(response_field) or "")
 
         user_prompt = instruction
         if context:
             user_prompt = f"{instruction}\n\nContext: {context}"
 
-        response = generate(model, tokenizer, user_prompt, max_new_tokens=300)
+        response = generate(model, tokenizer, user_prompt,
+                            system=domain_system, max_new_tokens=300)
 
-        judge_prompt = f"""You are an expert evaluator. Rate the following AI response on a scale of 1-5.
-
-Question: {instruction[:400]}
-
-Reference answer: {ground_truth[:400]}
-
-AI response: {response[:400]}
-
-Rating criteria:
-1 — Completely wrong or irrelevant
-2 — Partially addresses the question with major errors
-3 — Correct answer but missing key details
-4 — Correct and mostly complete, minor omissions
-5 — Accurate, complete, domain-appropriate response
-
-Respond with ONLY a single digit (1-5). No explanation."""
+        judge_prompt = (
+            f"You are an expert evaluator. Rate the following AI response on a scale of 1-5.\n\n"
+            f"Question: {instruction[:400]}\n\n"
+            f"Reference answer: {ground_truth[:400]}\n\n"
+            f"AI response: {response[:400]}\n\n"
+            f"{rubric}\n\n"
+            f"Respond with ONLY a single digit (1-5). No explanation."
+        )
 
         try:
             completion = groq_client.chat.completions.create(
@@ -291,8 +349,9 @@ Respond with ONLY a single digit (1-5). No explanation."""
                 max_tokens=5,
                 temperature=0,
             )
-            score_text = completion.choices[0].message.content.strip()
-            score = int(re.search(r'[1-5]', score_text).group())
+            score_text = completion.choices[0].message.content or ""
+            m = re.search(r'[1-5]', score_text.strip())
+            score = int(m.group()) if m else 3
         except Exception as e:
             print(f"Groq judge error: {e}")
             score = 3  # neutral fallback on API error
@@ -310,6 +369,7 @@ Respond with ONLY a single digit (1-5). No explanation."""
     results = {
         "mode":         "llm_judge",
         "judge_model":  JUDGE_MODEL,
+        "judge_system": judge_system_key or "generic",
         "dataset":      dataset_name,
         "num_samples":  len(scores),
         "avg_score":    round(avg_score, 3),
@@ -321,6 +381,8 @@ Respond with ONLY a single digit (1-5). No explanation."""
     print(f"LLM JUDGE (Groq {JUDGE_MODEL})")
     print(f"Average score: {avg_score:.2f}/5.0")
     print(f"Distribution:  {score_dist}")
+    if baseline_note:
+        print(baseline_note)
     print(f"{'='*50}")
 
     return results

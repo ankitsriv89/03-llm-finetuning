@@ -43,13 +43,16 @@ Dataset (HuggingFace Hub)
 
 ## Domains and Datasets
 
-| Phase | Domain | Dataset | Samples | Max Seq Len |
-|-------|--------|---------|---------|-------------|
+| Phase | Domain | Dataset(s) | Samples | Max Seq Len |
+|-------|--------|------------|---------|-------------|
 | 1 | General | `databricks/databricks-dolly-15k` | 5K | 512 |
 | 2 | Medical | `medalpaca/medical_meadow_medqa` | 10K | 1024 |
-| 3 | Legal | `nguyen-brat/legal_contracts` | 5K | 2048 |
+| 3a | Legal (Contracts, universal) | `nguyen-brat/legal_contracts` + `pile-of-law/freelaw` | 10K + 5K aux | 2048 |
+| 3b | Legal (Indian law, JusticeAI) | `viber1/indian-law-dataset` + `InLegalNLI` + local BNS mapping | varies + 3K aux + ~800 mapping | 2048 |
 | 4 | Finance | `gbharti/finance-alpaca` (subset) | 10K | 512 |
 | 5 | Coding | `HuggingFaceH4/CodeAlpaca_20K` | 20K | 1024 |
+
+**Phase 3 note**: Phase 3 was split into two parallel variants. **3a** targets universal contract clause QA. **3b** targets Indian law for JusticeAI (Project 9), and ships with a locally-generated BNS/BNSS/BSA mapping dataset (`scripts/build_bns_mapping_dataset.py` → `data/bns_bnss_bsa_mapping.jsonl`) that corrects the pre-July-2024 statute references baked into public Indian legal datasets. See `docs/CHANGELOG.md` for details.
 
 ---
 
@@ -73,15 +76,23 @@ Trainable parameters: ~20M out of 3.75B total (~0.53%)
 ```
 03-llm-finetuning/
 ├── configs/
-│   ├── phase1_mistral_dolly.yaml      ← general (foundation)
-│   ├── phase2_medical_medqa.yaml      ← medical QA
-│   ├── phase3_legal.yaml              ← legal contracts
-│   ├── phase4_finance.yaml            ← finance alpaca
-│   └── phase5_coding.yaml             ← code generation
+│   ├── phase1_mistral_dolly.yaml         ← general (foundation)
+│   ├── phase2_medical_medqa.yaml         ← medical QA
+│   ├── phase3a_legal_contracts.yaml      ← universal contract clause QA
+│   ├── phase3b_indian_law.yaml           ← Indian law (JusticeAI adapter)
+│   ├── phase4_finance.yaml               ← finance alpaca
+│   └── phase5_coding.yaml                ← code generation
 ├── scripts/
-│   ├── train.py                       ← QLoRA training (config-driven)
-│   ├── inference.py                   ← load adapter + generate
-│   └── push_to_hub.py                 ← upload adapter to HF Hub
+│   ├── train.py                          ← QLoRA training (config-driven)
+│   ├── train_runpod_medical.py           ← Phase 2 GPU-agnostic RunPod runner
+│   ├── train_runpod_legal_contracts.py   ← Phase 3a GPU-agnostic RunPod runner
+│   ├── train_runpod_indian_law.py        ← Phase 3b GPU-agnostic RunPod runner
+│   ├── build_bns_mapping_dataset.py      ← generates BNS/BNSS/BSA mapping JSONL
+│   ├── evaluate.py                       ← MCQ + LLM-as-judge eval (Groq)
+│   ├── inference.py                      ← load adapter + generate
+│   └── push_to_hub.py                    ← upload adapter to HF Hub
+├── data/
+│   └── bns_bnss_bsa_mapping.jsonl        ← 800+ post-July-2024 statute samples
 ├── notebooks/
 │   ├── 01_phase1_mistral_dolly.ipynb  ← run on Kaggle/Colab
 │   ├── 02_medical.ipynb
