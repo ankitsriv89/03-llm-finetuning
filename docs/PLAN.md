@@ -101,10 +101,12 @@ This is more efficient than loading 5 separate models (each 3.5GB in 4-bit).
 - [x] configs/phase2_medical_medqa.yaml
 - [x] notebooks/02_medical.ipynb
 - [x] scripts/evaluate.py (MCQ + Groq LLM-judge modes)
+- [x] scripts/train_runpod_medical.py (GPU-agnostic single-GPU script)
 - [x] Dataset: medalpaca/medical_meadow_medqa
-- [ ] Run on Kaggle T4 GPU
-- [ ] Evaluation: 4-option MCQ accuracy on held-out set
-- [ ] Push medical adapter
+- [x] Run on Kaggle T4 GPU (**partial: ~171/1144 steps, ~0.3 epochs**)
+- [x] Evaluation: MCQ accuracy 39% on 100 held-out samples (target was ≥50%)
+- [x] Push medical adapter → https://huggingface.co/anksriv/mistral-7b-medical-medqa-qlora
+- [ ] **Full re-run on RunPod (target: 2 epochs, ≥50% accuracy on 500 samples)**
 
 ### Phase 3: Legal Domain
 - [ ] configs/phase3_legal.yaml
