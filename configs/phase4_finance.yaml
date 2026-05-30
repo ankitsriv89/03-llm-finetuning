@@ -1,0 +1,104 @@
+# ============================================================
+# Phase 4 Config: Mistral-7B + Finance (Finance Alpaca)
+# ============================================================
+# Fine-tunes Mistral-7B-Instruct on general finance Q&A.
+#
+#   Dataset: gbharti/finance-alpaca
+#            68K samples — use a shuffled 10K subset
+#            Format: {instruction, input, output}
+#            Same structure as Dolly — same formatting function applies
+#            License: CC BY 4.0
+#            Content: P/E ratios, DCF, EBITDA, portfolio theory,
+#                     macro indicators, derivatives, risk metrics, etc.
+#
+# Note: 'input' is often empty — treated like Dolly's context field.
+# Shuffle before subsetting to break topic clusters in the raw dataset.
+#
+# Goal: LLM-judge score >= 3.5/5.0 (baseline Mistral ~3.0)
+#
+# Eval: LLM-as-judge via Groq llama-3.3-70b-versatile (finance rubric)
+# RunPod script: scripts/train_runpod_finance.py
+
+
+# --- Model ---
+model:
+  name: "mistralai/Mistral-7B-Instruct-v0.2"
+  load_in_4bit: true
+  bnb_4bit_compute_dtype: "float16"
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_use_double_quant: true
+
+
+# --- LoRA Adapter ---
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+
+# --- Dataset ---
+dataset:
+  name: "gbharti/finance-alpaca"
+  split: "train"
+  max_samples: 10000       # shuffled subset of 68K — covers topic breadth
+  shuffle_seed: 42         # shuffle before selecting to break topic clusters
+
+  test_size: 0.1           # ~1K held-out for eval
+  instruction_field: "instruction"
+  context_field: "input"   # often empty — same pattern as Dolly's context field
+  response_field: "output"
+
+
+# --- Training ---
+training:
+  output_dir: "./outputs/phase4-finance"
+
+  num_train_epochs: 3
+
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  # effective batch = 16 (same as prior phases)
+  # seq_len=512 means 4x smaller sequences than legal phases — larger batches are safe
+
+  learning_rate: 2.0e-4
+  # ^ Slightly higher than legal (1.5e-4) — finance vocabulary is closer to
+  #   Mistral's pretraining distribution so the model adapts faster.
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+
+  max_seq_length: 512
+  # ^ Finance Alpaca samples are short. 512 covers >95% without truncation.
+  #   Halving seq_len vs medical (1024) roughly doubles throughput.
+
+  fp16: false              # bf16=True set in script
+  logging_steps: 10
+  save_steps: 200
+  save_total_limit: 2
+  report_to: "none"
+
+
+# --- Evaluation ---
+evaluation:
+  enabled: true
+  mode: "llm"
+  metric: "llm_judge_score"
+  max_eval_samples: 100
+  target_improvement_pts: 0.5   # target >=3.5 vs baseline ~3.0
+  judge_system: "finance"
+
+
+# --- HuggingFace Hub ---
+hub:
+  adapter_name: "finance"
+  repo_suffix: "mistral-7b-finance-qlora"
+  # Full repo ID: {your_hf_username}/mistral-7b-finance-qlora

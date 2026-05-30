@@ -117,11 +117,12 @@ This is more efficient than loading 5 separate models (each 3.5GB in 4-bit).
 - [ ] Push legal adapter
 
 ### Phase 4: Finance Domain
-- [ ] configs/phase4_finance.yaml
+- [x] configs/phase4_finance.yaml
 - [ ] notebooks/04_finance.ipynb
-- [ ] Dataset: finance-alpaca subset
-- [ ] Evaluation: FinQA accuracy, financial reasoning quality
-- [ ] Push finance adapter
+- [x] Dataset: gbharti/finance-alpaca (shuffled 10K subset)
+- [x] scripts/train_runpod_finance.py
+- [x] Evaluation: LLM-as-judge via Groq (finance rubric, target >=3.5/5.0)
+- [ ] Push finance adapter (after RunPod run)
 
 ### Phase 5: Coding Domain
 - [ ] configs/phase5_coding.yaml

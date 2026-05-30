@@ -7,6 +7,24 @@ Dates are absolute (YYYY-MM-DD).
 
 ---
 
+## [Phase 4 — Finance] — 2026-05-31
+
+### Added
+- `configs/phase4_finance.yaml` — Mistral-7B + `gbharti/finance-alpaca` (shuffled 10K subset of 68K). Single dataset, no auxiliary mix. max_seq_length=512 (short samples). LoRA r=16, 3 epochs, LR 2.0e-4. Effective batch 16.
+- `scripts/train_runpod_finance.py` — GPU-agnostic RunPod runner. seq_len=512 enables larger batch sizes vs legal phases: 16/8/8/4 for A100/A40/4090/T4 tiers. Est. wall time ~15–50 min depending on GPU.
+- Finance system prompt: expert financial analyst framing + "not financial advice" disclaimer.
+- Post-training LLM-as-judge eval via Groq `llama-3.3-70b-versatile` (finance rubric). Baseline ~3.0/5.0, target ≥3.5/5.0.
+- Finance judge rubric: 5-point scale checking correct formula/concept, direction of effect, key caveats, appropriate risk flags.
+
+### Design note — Phase 4 scope
+Phase 4 of project 03 is intentionally simple: one dataset, one adapter, standard pipeline. An expanded multi-domain finance project (macroeconomics, Indian markets, quant econometrics, development economics — each with specialty JSONL datasets) is planned as a **separate standalone project** to keep project 03 clean and focused.
+
+### Known limitations
+- `gbharti/finance-alpaca` contains date-sensitive data (historical stock prices, past rates) — system prompt instructs model to flag figures for verification.
+- Adapter not yet run on RunPod — `outputs/phase4-finance/` will populate after GPU run.
+
+---
+
 ## [Phase 3 — Legal] — 2026-05-30
 
 Phase 3 split into two parallel variants targeting universal contract law and Indian law respectively. Indian law variant ships with a locally-curated BNS/BNSS/BSA mapping dataset that corrects the pre-July-2024 statute references baked into public Indian legal datasets.
@@ -47,7 +65,8 @@ Phase 3 split into two parallel variants targeting universal contract law and In
 - Indian SC has flagged "phantom citations" by AI legal tools in early-2026 review; the BNS mapping addresses statute-name accuracy but not citation grounding (which requires the JusticeAI RAG layer).
 
 ### Next session
-- Begin Phase 4 (Finance) or run Phase 3b on RunPod and push the JusticeAI adapter to HF Hub.
+- Run Phase 4 (Finance) on RunPod and push adapter to HF Hub.
+- Or run Phase 3b on RunPod and push the JusticeAI adapter to HF Hub.
 
 ---
 

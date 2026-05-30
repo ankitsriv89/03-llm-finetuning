@@ -125,7 +125,9 @@ No standard MCQ — use LLM-as-judge:
 
 **Primary:** `gbharti/finance-alpaca`  
 **License:** CC BY 4.0  
-**Size:** 68,634 samples — use 10,000  
+**Size:** 68,634 samples — use shuffled 10K subset  
+**Script:** `scripts/train_runpod_finance.py`  
+**Config:** `configs/phase4_finance.yaml`  
 
 ### Sample Structure
 ```json
@@ -137,23 +139,31 @@ No standard MCQ — use LLM-as-judge:
 ```
 
 ### Formatting Notes
-- Same structure as Dolly — use the same formatting function
-- `input` field is often empty — handle like Dolly's `context`
-- Shuffle before selecting 10K subset (dataset has topic clusters; shuffling ensures diversity)
-- max_seq_length=512 is fine for most samples
+- Same structure as Dolly — `instruction` + optional `input` (context) + `output`
+- `input` field is often empty — handled like Dolly's `context` (appended to instruction if non-empty)
+- **Shuffle before selecting 10K subset** — raw dataset has topic clusters; shuffling ensures breadth
+- max_seq_length=512 covers >95% of samples; allows larger batches vs legal phases (seq_len=2048)
 
 ### Finance-Specific Considerations
-- Numerical reasoning: LLMs are weak at arithmetic. For calculation Q&A, train on step-by-step solutions
-- Include disclaimer: "This is not financial advice" — add to system prompt in demo
-- Watch out for date-specific information (stock prices, interest rates) — may become stale
-
-### Alternative Datasets
-- `sujet-ai/Sujet-Finance-Instruct-177k` — larger, higher quality
-- `FinGPT/fingpt-sentiment-train` — financial sentiment specifically
-- `TheFinAI/flare-ner` — financial named entity recognition
+- Numerical reasoning: LLMs hallucinate plausible-looking numbers. System prompt instructs step-by-step calculation. Judge rubric penalises wrong formulas and wrong directions of effect.
+- Disclaimer: "not financial advice" baked into system prompt.
+- Date-sensitive data (historical stock prices, past rates) — system prompt instructs model to flag figures for verification.
 
 ### Evaluation Metric
-FinQA (`ibm/finqa`) has a test split with numerical Q&A. Extract numbers from responses and compare exact match. Harder but more meaningful than human eval.
+LLM-as-judge via Groq `llama-3.3-70b-versatile`, 100 samples, finance rubric. Baseline ~3.0/5.0, target ≥3.5/5.0.
+
+**Finance judge rubric:**
+- 1 — Wrong concept, incorrect direction of effect, hallucinated metric/formula
+- 2 — Correct area, wrong formula/units, significant calculation error
+- 3 — Correct concept, missing key caveat or risk flag
+- 4 — Correct, well-explained, minor omission
+- 5 — Accurate, correct formula/framework, appropriate risk caveats
+
+### Alternative Datasets (for expanded finance project)
+- `sujet-ai/Sujet-Finance-Instruct-177k` — larger, higher quality general finance
+- `FinGPT/fingpt-sentiment-train` — financial sentiment
+- `ibm/finqa` — numerical reasoning over financial tables (use train/test splits carefully)
+- `TheFinAI/flare-convfinqa` — multi-turn numerical reasoning
 
 ---
 
